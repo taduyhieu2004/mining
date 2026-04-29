@@ -1,0 +1,7 @@
+Model,Best Params,Accuracy
+Gradient Boosting,"{'model__learning_rate': 0.1, 'model__max_depth': 3, 'model__n_estimators': 200}",0.9932857142857143
+Random Forest,"{'model__max_depth': 20, 'model__min_samples_split': 2, 'model__n_estimators': 200}",0.9918571428571429
+Logistic Regression,{'model__C': 0.01},0.9912142857142857
+SVM,"{'model__C': 0.1, 'model__kernel': 'rbf'}",0.9910714285714286
+KNN,"{'model__n_neighbors': 7, 'model__weights': 'uniform'}",0.9889285714285714
+Decision Tree,"{'model__max_depth': 20, 'model__min_samples_split': 10}",0.9825714285714285
