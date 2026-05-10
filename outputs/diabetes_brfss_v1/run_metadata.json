@@ -1,0 +1,46 @@
+{
+  "dataset_path": "diabetes_binary_5050split_health_indicators_BRFSS2015.csv",
+  "target_column": "Diabetes_binary",
+  "n_rows_before_dedup": 70692,
+  "n_rows_after_dedup": 69057,
+  "dropped_duplicates": 1635,
+  "n_rows": 69057,
+  "n_columns": 22,
+  "feature_columns": [
+    "HighBP",
+    "HighChol",
+    "CholCheck",
+    "BMI",
+    "Smoker",
+    "Stroke",
+    "HeartDiseaseorAttack",
+    "PhysActivity",
+    "Fruits",
+    "Veggies",
+    "HvyAlcoholConsump",
+    "AnyHealthcare",
+    "NoDocbcCost",
+    "GenHlth",
+    "MentHlth",
+    "PhysHlth",
+    "DiffWalk",
+    "Sex",
+    "Age",
+    "Education",
+    "Income"
+  ],
+  "data_profile_path": "outputs/diabetes_brfss_v1/data_profile.csv",
+  "train_shape": [
+    55245,
+    21
+  ],
+  "test_shape": [
+    13812,
+    21
+  ],
+  "best_model": "gradient_boosting",
+  "best_recall": 0.8001424501424501,
+  "best_precision": 0.7316660153705875,
+  "selection_metric": "recall",
+  "output_dir": "outputs/diabetes_brfss_v1"
+}

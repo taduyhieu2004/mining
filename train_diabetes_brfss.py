@@ -17,7 +17,6 @@ from sklearn.model_selection import GridSearchCV, train_test_split
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
-from sklearn.svm import SVC
 from sklearn.tree import DecisionTreeClassifier
 
 
@@ -25,6 +24,7 @@ DATA_PATH = Path("diabetes_binary_5050split_health_indicators_BRFSS2015.csv")
 OUTPUT_DIR = Path("outputs/diabetes_brfss_v1")
 TARGET_COL = "Diabetes_binary"
 RANDOM_STATE = 42
+SELECTION_METRIC = "recall"
 
 
 def build_data_profile(df: pd.DataFrame) -> pd.DataFrame:
@@ -63,6 +63,15 @@ def main() -> None:
     df = pd.read_csv(DATA_PATH)
     if TARGET_COL not in df.columns:
         raise ValueError(f"Khong tim thay cot target '{TARGET_COL}' trong du lieu.")
+
+    n_rows_before_dedup = int(df.shape[0])
+    df = df.drop_duplicates().reset_index(drop=True)
+    n_rows_after_dedup = int(df.shape[0])
+    dropped_duplicates = n_rows_before_dedup - n_rows_after_dedup
+    print(
+        f"Da drop duplicate: {dropped_duplicates} dong "
+        f"(tu {n_rows_before_dedup} con {n_rows_after_dedup})"
+    )
 
     # Tao profile de xac nhan schema cua data moi khac data cu
     data_profile = build_data_profile(df)
@@ -152,25 +161,14 @@ def main() -> None:
                 "model__weights": ["uniform", "distance"],
             },
         },
-        "svm": {
-            "pipeline": Pipeline(
-                [
-                    ("scaler", StandardScaler()),
-                    ("model", SVC()),
-                ]
-            ),
-            "params": {
-                "model__C": [0.1, 1, 10],
-                "model__kernel": ["linear", "rbf"],
-            },
-        },
     }
 
     results = []
     all_models = {}
     best_model = None
     best_model_name = ""
-    best_score = 0.0
+    best_recall = 0.0
+    best_precision = 0.0
 
     for model_name, config in models.items():
         print(f"\nDang train: {model_name}")
@@ -210,8 +208,13 @@ def main() -> None:
         )
         all_models[model_name] = model
 
-        if rec > best_score:
-            best_score = rec
+        # Uu tien recall cho bai toan sang loc tieu duong.
+        # Neu recall bang nhau thi uu tien precision cao hon.
+        if (rec > best_recall) or (
+            np.isclose(rec, best_recall) and prec > best_precision
+        ):
+            best_recall = rec
+            best_precision = prec
             best_model = model
             best_model_name = model_name
 
@@ -236,7 +239,9 @@ def main() -> None:
 
     with report_path.open("w", encoding="utf-8") as f:
         f.write(f"Best model: {best_model_name}\n")
-        f.write(f"Best recall (class 1): {best_score:.6f}\n\n")
+        f.write(f"Selection metric: {SELECTION_METRIC}\n")
+        f.write(f"Best recall (class 1): {best_recall:.6f}\n")
+        f.write(f"Best precision (class 1): {best_precision:.6f}\n\n")
         f.write("Classification report:\n")
         f.write(report_text)
         f.write("\nConfusion matrix:\n")
@@ -246,6 +251,9 @@ def main() -> None:
     metadata = {
         "dataset_path": str(DATA_PATH),
         "target_column": TARGET_COL,
+        "n_rows_before_dedup": n_rows_before_dedup,
+        "n_rows_after_dedup": n_rows_after_dedup,
+        "dropped_duplicates": dropped_duplicates,
         "n_rows": int(df.shape[0]),
         "n_columns": int(df.shape[1]),
         "feature_columns": list(X.columns),
@@ -253,14 +261,20 @@ def main() -> None:
         "train_shape": [int(X_train.shape[0]), int(X_train.shape[1])],
         "test_shape": [int(X_test.shape[0]), int(X_test.shape[1])],
         "best_model": best_model_name,
-        "best_recall": float(best_score),
-        "selection_metric": "recall",
+        "best_recall": float(best_recall),
+        "best_precision": float(best_precision),
+        "selection_metric": SELECTION_METRIC,
         "output_dir": str(OUTPUT_DIR),
     }
     with metadata_path.open("w", encoding="utf-8") as f:
         json.dump(metadata, f, ensure_ascii=False, indent=2)
 
     print("\nHoan tat train!")
+    print("\n=== MODEL TOT NHAT CHO PHAN LOAI TIEU DUONG ===")
+    print(f"Tieu chi chon: {SELECTION_METRIC}")
+    print(f"Ten model: {best_model_name}")
+    print(f"Recall (class 1): {best_recall:.6f}")
+    print(f"Precision (class 1): {best_precision:.6f}")
     print(f"Data profile: {data_profile_path}")
     print(f"Ket qua tong hop: {results_path}")
     print(f"Bao cao model tot nhat: {report_path}")
