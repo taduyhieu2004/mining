@@ -613,9 +613,7 @@ elif page == "Quản trị & Tái huấn luyện":
             f"- **Lần kiểm tra gần nhất:** `{status['last_check_at'] or '—'}`\n"
             f"- **Lần kiểm tra kế tiếp:** `{status['next_run_at'] or '—'}`\n"
             f"- **Lần retrain gần nhất do scheduler:** "
-            f"`{status['last_retrain_at'] or '—'}`\n"
-            f"- **Ghi chú lần trigger gần nhất:** "
-            f"{status['last_trigger_reason'] or '—'}"
+            f"`{status['last_retrain_at'] or '—'}`"
         )
 
         if status["pending_new_files"]:
