@@ -33,10 +33,12 @@ STATE_FILE = BASE_DIR / "data" / "scheduler_state.json"
 MIN_NEW_ROWS = 100
 DEFAULT_INTERVAL_MINUTES = 10
 JOB_ID = "retrain_check"
+FEEDBACK_FILE = INCOMING_DIR / "feedback.csv"
 
 _scheduler: Optional[BackgroundScheduler] = None
 _init_lock = threading.Lock()
 _running_lock = threading.Lock()
+_base_cache: dict = {"mtime": None, "df": None}
 
 
 def _default_state() -> dict:
@@ -46,6 +48,7 @@ def _default_state() -> dict:
         "last_trigger_reason": None,
         "interval_minutes": DEFAULT_INTERVAL_MINUTES,
         "min_new_rows": MIN_NEW_ROWS,
+        "feedback_rows_baseline": 0,
     }
 
 
@@ -75,26 +78,97 @@ def _last_retrain_dt(state: dict) -> Optional[datetime]:
         return None
 
 
+def _safe_row_count(path: Path) -> int:
+    try:
+        return len(pd.read_csv(path))
+    except Exception:
+        return 0
+
+
+def _load_base_unique() -> pd.DataFrame:
+    """Doc base dataset va dedup, co cache theo mtime."""
+    base_path = rt.DATA_PATH
+    if not base_path.exists():
+        return pd.DataFrame()
+    mtime = base_path.stat().st_mtime
+    if _base_cache["mtime"] == mtime and _base_cache["df"] is not None:
+        return _base_cache["df"]
+    try:
+        df = pd.read_csv(base_path).drop_duplicates().reset_index(drop=True)
+    except Exception:
+        return pd.DataFrame()
+    _base_cache["mtime"] = mtime
+    _base_cache["df"] = df
+    return df
+
+
+def _safe_read(path: Path) -> pd.DataFrame:
+    try:
+        return pd.read_csv(path)
+    except Exception:
+        return pd.DataFrame()
+
+
 def count_new_rows() -> tuple[int, list[str]]:
-    """Dem so dong va liet ke file CSV moi them vao incoming/ ke tu lan retrain cuoi."""
+    """Dem so dong UNIQUE thuc su se duoc them vao tap huan luyen.
+
+    Logic moi (khac voi dem tho tong dong):
+        1. Doc base dataset, dedup -> base_unique.
+        2. Gom du lieu chua duoc huan luyen:
+           - feedback.csv: phan tu dong sau "feedback_rows_baseline".
+           - Cac CSV upload khac trong incoming/ co mtime > last_retrain_at.
+        3. Noi base + du lieu moi, dedup tren cac cot chung, lay hieu so
+           voi base_unique -> so dong UNIQUE thuc te se them vao training.
+
+    Cach nay khop dung voi retrain.load_combined_dataset() (cung drop_duplicates),
+    nen "100 dong moi" la 100 mau huan luyen UNIQUE that su, khong phai
+    100 ban ghi tho co the trung lap.
+    """
     state = _load_state()
     cutoff = _last_retrain_dt(state)
     if not INCOMING_DIR.exists():
         return 0, []
 
-    new_rows = 0
+    base_unique = _load_base_unique()
+
+    new_dfs: list[pd.DataFrame] = []
     new_files: list[str] = []
+
+    if FEEDBACK_FILE.exists():
+        baseline = int(state.get("feedback_rows_baseline", 0) or 0)
+        df_fb = _safe_read(FEEDBACK_FILE)
+        if len(df_fb) > baseline:
+            delta_df = df_fb.iloc[baseline:].copy()
+            if not delta_df.empty:
+                new_dfs.append(delta_df)
+                new_files.append(f"{FEEDBACK_FILE.name} (+{len(delta_df)})")
+
     for p in sorted(INCOMING_DIR.glob("*.csv")):
+        if p.name == FEEDBACK_FILE.name:
+            continue
         mtime = datetime.fromtimestamp(p.stat().st_mtime)
         if cutoff is not None and mtime <= cutoff:
             continue
-        try:
-            n = len(pd.read_csv(p))
-        except Exception:
+        df = _safe_read(p)
+        if df.empty:
             continue
-        new_rows += n
+        new_dfs.append(df)
         new_files.append(p.name)
-    return new_rows, new_files
+
+    if not new_dfs:
+        return 0, []
+
+    new_all = pd.concat(new_dfs, ignore_index=True)
+    if not base_unique.empty:
+        new_all = new_all[base_unique.columns.intersection(new_all.columns)]
+        if new_all.empty:
+            return 0, new_files
+        combined_unique = pd.concat([base_unique, new_all], ignore_index=True).drop_duplicates()
+        unique_new = max(0, len(combined_unique) - len(base_unique))
+    else:
+        unique_new = len(new_all.drop_duplicates())
+
+    return unique_new, new_files
 
 
 def tick() -> None:
@@ -113,6 +187,8 @@ def tick() -> None:
             try:
                 rt.run_retrain()
                 state["last_retrain_at"] = datetime.now().isoformat(timespec="seconds")
+                if FEEDBACK_FILE.exists():
+                    state["feedback_rows_baseline"] = _safe_row_count(FEEDBACK_FILE)
                 state["last_trigger_reason"] = (
                     f"Trigger: {new_rows} dong moi tu {len(new_files)} file "
                     f">= nguong {threshold}"

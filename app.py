@@ -20,6 +20,7 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
+import feedback as fb
 import retrain as rt
 import scheduler as sch
 
@@ -376,6 +377,19 @@ if page == "Dự đoán":
             "Education": Education, "Income": Income,
         }
         label, proba = predict_row(values)
+        st.session_state["last_prediction"] = {
+            "id": datetime.now().isoformat(),
+            "values": values,
+            "label": int(label),
+            "proba": float(proba),
+        }
+        st.session_state.pop("feedback_done_for", None)
+
+    last_pred = st.session_state.get("last_prediction")
+    if last_pred:
+        values = last_pred["values"]
+        label = last_pred["label"]
+        proba = last_pred["proba"]
 
         st.markdown("## Kết quả")
         col1, col2 = st.columns([1, 2])
@@ -405,6 +419,40 @@ if page == "Dự đoán":
             "có giá trị tham khảo. Để được chẩn đoán chính xác, vui lòng liên hệ "
             "cơ sở y tế."
         )
+
+        st.markdown("### Phản hồi kết quả")
+        st.caption(
+            "Nếu bạn đã biết chẩn đoán thực tế, hãy xác nhận giúp hệ thống. "
+            "Phản hồi sẽ được lưu vào kho dữ liệu và dùng làm dữ liệu mới cho "
+            "lần tái huấn luyện kế tiếp."
+        )
+
+        if st.session_state.get("feedback_done_for") == last_pred["id"]:
+            st.success("Đã ghi nhận phản hồi cho lần dự đoán này. Cảm ơn bạn!")
+        else:
+            note = st.text_input(
+                "Ghi chú (tuỳ chọn)",
+                key=f"fb_note_{last_pred['id']}",
+                placeholder="Ví dụ: bệnh nhân đã được chẩn đoán xác định...",
+            )
+            b1, b2 = st.columns(2)
+            if b1.button(
+                "✓ Dự đoán đúng", use_container_width=True, key=f"fb_ok_{last_pred['id']}"
+            ):
+                fb.save(values, label, proba, actual_label=label, note=note)
+                st.session_state["feedback_done_for"] = last_pred["id"]
+                st.success("Đã lưu phản hồi (đúng).")
+                st.rerun()
+            if b2.button(
+                "✗ Dự đoán sai", use_container_width=True, key=f"fb_no_{last_pred['id']}"
+            ):
+                actual = 0 if label == 1 else 1
+                fb.save(values, label, proba, actual_label=actual, note=note)
+                st.session_state["feedback_done_for"] = last_pred["id"]
+                st.success(
+                    "Đã lưu phản hồi (sai). Nhãn thực tế được đảo ngược so với dự đoán."
+                )
+                st.rerun()
 
 
 # ---------------------------------------------------------------

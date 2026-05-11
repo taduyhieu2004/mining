@@ -1,7 +1,8 @@
 {
-  "last_check_at": "2026-05-11T23:41:30",
+  "last_check_at": "2026-05-11T23:59:30",
   "last_retrain_at": "2026-05-11T23:12:40",
   "last_trigger_reason": "Bo qua: 0 dong moi < nguong 100",
   "interval_minutes": 10,
-  "min_new_rows": 100
+  "min_new_rows": 100,
+  "feedback_rows_baseline": 0
 }
