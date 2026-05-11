@@ -1,0 +1,6 @@
+model,best_params,cv_recall,test_recall,test_precision,accuracy
+gradient_boosting,"{'model__learning_rate': 0.05, 'model__max_depth': 5, 'model__n_estimators': 200}",0.7981621968158992,0.8001424501424501,0.7316660153705875,0.7492759918911092
+random_forest,"{'model__max_depth': 10, 'model__min_samples_split': 2, 'model__n_estimators': 200}",0.7974142536595791,0.7971509971509971,0.7279823077923767,0.7455111497248769
+decision_tree,"{'model__max_depth': 5, 'model__min_samples_split': 2}",0.8095950422053638,0.7729344729344729,0.7107676185485984,0.7247321169997104
+logistic_regression,{'model__C': 0.1},0.7705595327136091,0.7726495726495727,0.7379591836734694,0.7450043440486533
+knn,"{'model__n_neighbors': 11, 'model__weights': 'uniform'}",0.7637924279659508,0.7665242165242165,0.7132820784729587,0.7247321169997104

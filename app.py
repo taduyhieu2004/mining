@@ -21,12 +21,16 @@ import pandas as pd
 import streamlit as st
 
 import retrain as rt
+import scheduler as sch
 
 
 BASE_DIR = Path(__file__).resolve().parent
 CHAMPION_DIR = BASE_DIR / "outputs" / "diabetes_brfss_v1"
 INCOMING_DIR = BASE_DIR / "data" / "incoming"
 INCOMING_DIR.mkdir(parents=True, exist_ok=True)
+
+if not sch.is_running():
+    sch.start()
 
 FEATURE_ORDER = [
     "HighBP", "HighChol", "CholCheck", "BMI", "Smoker", "Stroke",
@@ -409,10 +413,11 @@ if page == "Dự đoán":
 elif page == "Quản trị & Tái huấn luyện":
     st.title("Quản trị & Tái huấn luyện")
 
-    tab1, tab2, tab3 = st.tabs([
+    tab1, tab2, tab3, tab4 = st.tabs([
         "Champion",
         "Upload & Tái huấn luyện",
         "Lịch sử phiên bản",
+        "Lập lịch tự động",
     ])
 
     with tab1:
@@ -443,27 +448,56 @@ elif page == "Quản trị & Tái huấn luyện":
         st.markdown(
             "1. *(Tuỳ chọn)* Tải lên các tệp CSV mới có cấu trúc 22 cột "
             "(21 đặc trưng + cột `Diabetes_binary`).\n"
-            "2. Hệ thống sẽ gộp với dữ liệu gốc, kiểm tra schema và drift, "
-            "huấn luyện 5 mô hình, sau đó so sánh với Champion theo Recall.\n"
-            "3. Nếu Challenger ≥ Champion, mô hình mới sẽ được thăng cấp."
+            "2. Có thể **chỉ lưu vào kho dữ liệu** để scheduler tự gom đủ "
+            "ngưỡng rồi retrain, hoặc **lưu và retrain ngay**.\n"
+            "3. Hệ thống sẽ gộp với dữ liệu gốc, kiểm tra schema/drift, "
+            "huấn luyện 5 mô hình, so sánh Recall với Champion."
         )
+
+        if "uploader_key" not in st.session_state:
+            st.session_state["uploader_key"] = 0
 
         uploaded = st.file_uploader(
             "Tệp CSV bổ sung (có thể chọn nhiều tệp)",
             type=["csv"],
             accept_multiple_files=True,
+            key=f"uploader_{st.session_state['uploader_key']}",
         )
         force = st.checkbox(
             "Force promote dù recall thấp hơn (chỉ dùng khi debug)",
             value=False,
         )
 
-        if st.button("Chạy tái huấn luyện", type="primary"):
+        def _save_uploaded(files) -> list[str]:
+            saved: list[str] = []
+            for u in files:
+                target = INCOMING_DIR / f"{datetime.now():%Y%m%d_%H%M%S}_{u.name}"
+                target.write_bytes(u.getbuffer())
+                saved.append(target.name)
+            return saved
+
+        col_save, col_train = st.columns(2)
+
+        if col_save.button(
+            "Chỉ lưu vào kho dữ liệu", disabled=not uploaded
+        ):
+            saved = _save_uploaded(uploaded)
+            for name in saved:
+                st.write(f"- Đã lưu `{name}`")
+            st.success(
+                f"Đã lưu {len(saved)} file vào `data/incoming/`. "
+                "Scheduler sẽ tự kích hoạt retrain khi tổng số dòng mới "
+                f"≥ ngưỡng cấu hình (xem tab 'Lập lịch tự động')."
+            )
+            st.session_state["uploader_key"] += 1
+            st.rerun()
+
+        if col_train.button("Lưu & tái huấn luyện ngay", type="primary"):
             if uploaded:
-                for u in uploaded:
-                    target = INCOMING_DIR / f"{datetime.now():%Y%m%d_%H%M%S}_{u.name}"
-                    target.write_bytes(u.getbuffer())
-                    st.write(f"- Đã lưu `{target.name}`")
+                saved = _save_uploaded(uploaded)
+                for name in saved:
+                    st.write(f"- Đã lưu `{name}`")
+                st.session_state["uploader_key"] += 1
 
             with st.spinner(
                 "Đang chạy GridSearchCV cho 5 mô hình, vui lòng chờ trong vài phút…"
@@ -495,6 +529,27 @@ elif page == "Quản trị & Tái huấn luyện":
                 st.error("Schema có vấn đề:")
                 st.json(summary.schema_issues)
 
+        st.divider()
+        st.markdown("**Các file đang nằm trong `data/incoming/`**")
+        incoming_files = sorted(INCOMING_DIR.glob("*.csv"))
+        if not incoming_files:
+            st.caption("(Trống)")
+        else:
+            rows = []
+            for p in incoming_files:
+                try:
+                    n_rows = sum(1 for _ in p.open("r", encoding="utf-8")) - 1
+                except Exception:
+                    n_rows = "—"
+                rows.append({
+                    "Tệp": p.name,
+                    "Số dòng": n_rows,
+                    "Cập nhật": datetime.fromtimestamp(
+                        p.stat().st_mtime
+                    ).strftime("%Y-%m-%d %H:%M:%S"),
+                })
+            st.dataframe(pd.DataFrame(rows), use_container_width=True)
+
     with tab3:
         st.subheader("Lịch sử các lần tái huấn luyện")
         runs = rt.list_runs()
@@ -524,6 +579,97 @@ elif page == "Quản trị & Tái huấn luyện":
                 df.set_index("Thời điểm")["Recall Challenger"],
                 height=240,
             )
+
+    with tab4:
+        st.subheader("Lập lịch tự động (APScheduler)")
+        st.caption(
+            "Scheduler chạy nền cùng tiến trình Streamlit, định kỳ kiểm tra "
+            "thư mục `data/incoming/`. Chỉ kích hoạt retrain khi số dòng mới "
+            "kể từ lần huấn luyện gần nhất đạt ngưỡng cấu hình."
+        )
+
+        status = sch.get_status()
+
+        c1, c2, c3 = st.columns(3)
+        c1.metric(
+            "Trạng thái",
+            "Đang chạy" if status["running"] else "Dừng",
+        )
+        c2.metric("Chu kỳ (phút)", status["interval_minutes"])
+        c3.metric("Ngưỡng dòng mới", status["min_new_rows"])
+
+        c4, c5 = st.columns(2)
+        c4.metric(
+            "Dòng mới đang chờ",
+            status["pending_new_rows"],
+            help="Tổng số dòng trong các CSV được thêm vào sau lần retrain gần nhất.",
+        )
+        c5.metric(
+            "Đủ ngưỡng?",
+            "Có" if status["pending_new_rows"] >= status["min_new_rows"] else "Chưa",
+        )
+
+        st.markdown(
+            f"- **Lần kiểm tra gần nhất:** `{status['last_check_at'] or '—'}`\n"
+            f"- **Lần kiểm tra kế tiếp:** `{status['next_run_at'] or '—'}`\n"
+            f"- **Lần retrain gần nhất do scheduler:** "
+            f"`{status['last_retrain_at'] or '—'}`\n"
+            f"- **Ghi chú lần trigger gần nhất:** "
+            f"{status['last_trigger_reason'] or '—'}"
+        )
+
+        if status["pending_new_files"]:
+            with st.expander(
+                f"Các file đang chờ ({len(status['pending_new_files'])})"
+            ):
+                st.write(status["pending_new_files"])
+
+        st.divider()
+        st.markdown("**Cấu hình**")
+
+        new_interval = st.number_input(
+            "Chu kỳ kiểm tra (phút)",
+            min_value=1,
+            max_value=24 * 60,
+            value=int(status["interval_minutes"]),
+            step=1,
+        )
+        new_threshold = st.number_input(
+            "Số dòng mới tối thiểu để kích hoạt retrain",
+            min_value=1,
+            value=int(status["min_new_rows"]),
+            step=10,
+        )
+
+        b1, b2, b3 = st.columns(3)
+        if b1.button("Lưu cấu hình & khởi động lại"):
+            sch.stop()
+            sch.start(
+                interval_minutes=int(new_interval),
+                min_new_rows=int(new_threshold),
+            )
+            st.success("Đã cập nhật cấu hình scheduler.")
+            st.rerun()
+
+        if b2.button("Kiểm tra ngay"):
+            sch.run_now()
+            st.success(
+                "Đã yêu cầu chạy kiểm tra. Bấm 'Làm mới' sau vài giây để xem kết quả."
+            )
+
+        if status["running"]:
+            if b3.button("Dừng scheduler"):
+                sch.stop()
+                st.warning("Đã dừng scheduler.")
+                st.rerun()
+        else:
+            if b3.button("Khởi động scheduler"):
+                sch.start(
+                    interval_minutes=int(new_interval),
+                    min_new_rows=int(new_threshold),
+                )
+                st.success("Đã khởi động scheduler.")
+                st.rerun()
 
 
 # ---------------------------------------------------------------

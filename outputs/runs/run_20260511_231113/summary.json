@@ -1,0 +1,15 @@
+{
+  "timestamp": "20260511_231113",
+  "n_rows": 69057,
+  "new_rows_added": 500,
+  "schema_ok": true,
+  "schema_issues": [],
+  "drift_columns": [],
+  "challenger_model": "gradient_boosting",
+  "challenger_recall": 0.8001424501424501,
+  "champion_model": "gradient_boosting",
+  "champion_recall": 0.8001424501424501,
+  "promoted": true,
+  "decision_reason": "Challenger gradient_boosting (recall=0.8001) >= champion gradient_boosting (recall=0.8001)",
+  "run_dir": "/home/luatnq/Documents/mining/outputs/runs/run_20260511_231113"
+}
