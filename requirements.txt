@@ -1,0 +1,12 @@
+# Ứng dụng Streamlit + huấn luyện / retrain (scikit-learn)
+streamlit>=1.28.0
+pandas>=2.0.0
+numpy>=1.24.0
+scikit-learn>=1.3.0
+joblib>=1.3.0
+
+# Sơ đồ báo cáo: python gen_diagrams.py
+matplotlib>=3.7.0
+
+# Chụp màn hình UI: python capture_screens.py (sau khi cài: playwright install chromium)
+playwright>=1.40.0
